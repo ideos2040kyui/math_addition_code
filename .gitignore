@@ -1,8 +1,0 @@
-*.gitignore
-*.sh
-data*
-/*/
-!training_bydigit_N100.py
-!training_bydigit_N1000.py
-!training_bynumber_N100.py
-!training_bynumber_N1000.py
