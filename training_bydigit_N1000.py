@@ -25,7 +25,8 @@ set_seed(100)
 
 N = 1000
 MAX_LEN = 16
-def tokenizer(p, q, type):
+def tokenizer_bydigit(p, q, type):
+    """ pとqから 'p+q=r' という数式を作って桁ごとにtokenizeする関数 引数typeにはこのデータが訓練用か検証用か('train' or 'valid' or 'test') """
     text_input_ids = np.full_like(np.zeros([MAX_LEN], dtype=np.int64), N)
     target_input_ids = np.full_like(np.zeros([MAX_LEN], dtype=np.int64), N)
     text_attention_mask = np.zeros([MAX_LEN], dtype=np.int64)
@@ -47,7 +48,7 @@ def tokenizer(p, q, type):
     for i_idx, i in enumerate(p):
         text_input_ids[j], target_input_ids[j], text_attention_mask[j] = int(p[-i_idx-1]), -100, 1
         j -= 1
-    #token_id{ pad:N, eos:N+1, +:N+2, =:N+3 }
+    """特殊token_id{ pad:N, eos:N+1, +:N+2, =:N+3 }"""
 
     text_input_ids = torch.from_numpy(text_input_ids).clone()
     target_input_ids = torch.from_numpy(target_input_ids).clone()
@@ -85,12 +86,12 @@ class CreateTokenID(Dataset):
                     pass
                 elif self.type == "valid" and (i > N/2 or j > N/2):
                     text_list.append(f"{str(i)}+{str(j)}={str(i+j)}")
-                    tokenized_inputs, tokenized_targets = tokenizer(i, j, self.type)
+                    tokenized_inputs, tokenized_targets = tokenizer_bydigit(i, j, self.type)
                     self.inputs.append(tokenized_inputs)
                     self.targets.append(tokenized_targets)
                 elif (self.type == "train" or self.type == "test") and (i <= N/2 and j <= N/2):
                     text_list.append(f"{str(i)}+{str(j)}={str(i+j)}")
-                    tokenized_inputs, tokenized_targets = tokenizer(i, j, self.type)
+                    tokenized_inputs, tokenized_targets = tokenizer_bydigit(i, j, self.type)
                     self.inputs.append(tokenized_inputs)
                     self.targets.append(tokenized_targets)
                 else:
@@ -229,10 +230,6 @@ class GPT2Trainer(pl.LightningModule):
         loss, _ = self(input_ids, attention_mask, labels)
         acc = self._accuracy(input_ids, attention_mask, labels)
 
-        self.log("train_loss", loss, prog_bar=True)
-        # self.log("test_loss", loss, prog_bar=True)
-        wandb.log({"val_step_loss": loss})
-        self.validation_step_loss.append(loss.item())
         self.log("train_acc", acc, prog_bar=True)
         # self.log("test_acc", acc, prog_bar=True)
         wandb.log({"val_step_acc": acc})
@@ -240,9 +237,9 @@ class GPT2Trainer(pl.LightningModule):
         return loss
  
     def generate(self, x, y):
-        tokenized_inputs, _ = tokenizer(x, y, "train")
+        tokenized_inputs, _ = tokenizer_bydigit(x, y, "train")
         target_text = [["" if k==N+1 or k==N else str(k) for k in ["=" if j == N+3 else j for j in ["+" if i == N+2 else i for i in sentence]]] for sentence in tokenized_inputs["input_ids"].unsqueeze(dim=0).tolist()]
-        tokenized_inputs, _ = tokenizer(x, y, "valid")
+        tokenized_inputs, _ = tokenizer_bydigit(x, y, "valid")
         input_ids, attention_mask = tokenized_inputs["input_ids"].unsqueeze(dim=0), tokenized_inputs["attention_mask"].unsqueeze(dim=0)
         output_ids = self.model.generate(
             input_ids=input_ids,
@@ -257,18 +254,18 @@ class GPT2Trainer(pl.LightningModule):
         decorded_text = [["" if k==N+1 or k==N else str(k) for k in ["=" if j == N+3 else j for j in ["+" if i == N+2 else i for i in sentence]]] for sentence in output_ids]
         return decorded_text[0], target_text[0]
 
-batch_size = 512
-learning_rate = 1e-4
-num_epochs = 100
+if __name__ == '__main__':
+        
+    batch_size = 512
+    learning_rate = 1e-4
+    num_epochs = 100
 
-data_module = GPT2DataModule(batch_size)
-GPT2_Module = GPT2Trainer(learning_rate)
-trainer = pl.Trainer(devices=1, accelerator="gpu",max_epochs=num_epochs, precision=16)
+    data_module = GPT2DataModule(batch_size)
+    GPT2_Module = GPT2Trainer(learning_rate)
+    trainer = pl.Trainer(devices=1, accelerator="gpu",max_epochs=num_epochs, precision=16)
 
-trainer.fit(GPT2_Module, data_module)
-GPT2_Module.model.save_pretrained("models/GPT2_addition_model_bydigit_N1000")
+    trainer.fit(GPT2_Module, data_module)
+    GPT2_Module.model.save_pretrained("models/GPT2_addition_model_bydigit_N1000")
 
-GPT2_Module.model = AutoModelForCausalLM.from_pretrained("models/GPT2_addition_model_bydigit_N1000")
-predicted, answer = GPT2_Module.generate(527, 336)
-print(f"predicted:{''.join(predicted)}, answer:{''.join(answer)}")
-trainer.test(GPT2_Module, data_module)
+    GPT2_Module.model = AutoModelForCausalLM.from_pretrained("models/GPT2_addition_model_bydigit_N1000")
+    trainer.test(GPT2_Module, data_module)
